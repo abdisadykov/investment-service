@@ -1,29 +1,22 @@
 package com.abdisadykov.tinkoffservice.service;
 
-import com.abdisadykov.tinkoffservice.dto.StockDto;
-import com.abdisadykov.tinkoffservice.dto.StocksDto;
-import com.abdisadykov.tinkoffservice.dto.TickersDto;
+import com.abdisadykov.tinkoffservice.dto.*;
 import com.abdisadykov.tinkoffservice.exception.StockNotFoundException;
-import com.abdisadykov.tinkoffservice.model.Currency;
 import com.abdisadykov.tinkoffservice.model.Stock;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import ru.tinkoff.piapi.contract.v1.Instrument;
-import ru.tinkoff.piapi.contract.v1.InstrumentShort;
-import ru.tinkoff.piapi.contract.v1.Share;
+import ru.tinkoff.piapi.contract.v1.*;
 import ru.tinkoff.piapi.core.InvestApi;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TinkoffStockService implements StockService {
 
     private final InvestApi api;
@@ -38,6 +31,9 @@ public class TinkoffStockService implements StockService {
         var instrumentsService = api.getInstrumentsService();
         var instrumentShorts =
                 instrumentsService.findInstrumentSync(ticker);
+        if (instrumentShorts.isEmpty()) {
+            throw new StockNotFoundException("Stock " + ticker + " not found");
+        }
         List<Stock> stockList = instrumentShorts.stream()
                 .map(s ->
                         Stock.builder()
@@ -45,13 +41,10 @@ public class TinkoffStockService implements StockService {
                                 .figi(s.getFigi())
                                 .name(s.getName())
                                 .type(s.getInstrumentType())
-                                .currency("")
                                 .source("TINKOFF")
                                 .build()
                 ).toList();
-        if (stockList.isEmpty()) {
-            throw new StockNotFoundException("Stock " + ticker + " not found");
-        }
+
         return stockList.stream()
                 .filter(stock -> stock.getTicker().equals(ticker) && stock.getType().equals("share"))
                 .toList();
@@ -79,11 +72,8 @@ public class TinkoffStockService implements StockService {
 
     @Override
     public List<Stock> getAllTradableStocks() throws ExecutionException, InterruptedException {
-        var instrumentsService = api.getInstrumentsService();
-        var completableFuture =
-                instrumentsService.getTradableShares();
-
-        return completableFuture.get().stream().map(s ->
+        var instrumentService = api.getInstrumentsService();
+        return instrumentService.getTradableShares().join().stream().map(s ->
                         Stock.builder()
                             .ticker(s.getTicker())
                             .figi(s.getFigi())
@@ -94,4 +84,29 @@ public class TinkoffStockService implements StockService {
                             .build())
                 .toList();
     }
+
+    @Async
+    public CompletableFuture<GetOrderBookResponse> getOrderBookByFigi(String figi) {
+        var orderbook = api.getMarketDataService().getOrderBook(figi, 1);
+        //log.info("Getting price {} from", figi);
+        return orderbook;
+    }
+
+    @Override
+    public StocksPricesDto getPrices(FigiesDto figiesDto){
+        long start = System.currentTimeMillis();
+        List<CompletableFuture<GetOrderBookResponse>> orderBooks = new ArrayList<>();
+        figiesDto.getFigies().forEach(figi -> orderBooks.add(getOrderBookByFigi(figi)));
+        var stocksPrices = orderBooks.stream()
+                .map(CompletableFuture::join)
+                //.map(o -> (o==null) throw new StockNotFoundException("Stock not found"))
+                .map(ob -> new StockPrice
+                        (ob.getFigi(), ob.getLastPrice().getUnits()+ "."+ ob.getLastPrice().getNano()))
+                .toList();
+
+        log.info("Time: {}", System.currentTimeMillis()-start);
+        return new StocksPricesDto(stocksPrices);
+    }
+
+
 }

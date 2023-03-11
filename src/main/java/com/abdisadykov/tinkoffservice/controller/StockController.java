@@ -1,6 +1,8 @@
 package com.abdisadykov.tinkoffservice.controller;
 
+import com.abdisadykov.tinkoffservice.dto.FigiesDto;
 import com.abdisadykov.tinkoffservice.dto.StocksDto;
+import com.abdisadykov.tinkoffservice.dto.StocksPricesDto;
 import com.abdisadykov.tinkoffservice.dto.TickersDto;
 import com.abdisadykov.tinkoffservice.model.Stock;
 import com.abdisadykov.tinkoffservice.service.StockService;
@@ -30,6 +32,11 @@ public class StockController {
     @GetMapping("/stocks")
     public List<Stock> getAllTradableStocks() throws ExecutionException, InterruptedException {
         return stockService.getAllTradableStocks();
+    }
+
+    @PostMapping("/prices")
+    public StocksPricesDto  getPrices(@RequestBody FigiesDto figiesDto) {
+        return stockService.getPrices(figiesDto);
     }
 
 }
